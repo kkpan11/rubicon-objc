@@ -111,6 +111,87 @@ them and access their properties. In some cases, Rubicon also provides
 additional Python methods on Objective-C objects -
 see :ref:`python_style_apis_for_objc` for details.
 
+Invoking Objective-C methods
+----------------------------
+
+Once an Objective-C class has been wrapped, the selectors on that class (or
+instances of that class) can be invoked as if they were methods on the Python
+class. Each Objective-C selector is converted into a Python method name by
+replacing the colons in the selector with underscores.
+
+For example, the Objective-C class ``NSURL`` has defines a instance selector of
+``-initWithString:relativeToURL:``; this will be converted into the Python
+method ``initWithString_relativeToURL_()``. Arguments to this method are all
+positional, and passed in the order they are defined in the selector. Selectors
+without arguments (such as ``+alloc`` or ``-init``) are defined as methods with
+no arguments, and no underscores in the name:
+
+.. code-block:: python
+
+    # Wrap the NSURL class
+    NSURL = ObjCClass("NSURL")
+    # Invoke the +alloc selector
+    my_url = NSURL.alloc()
+    # Invoke -initWithString:relativeToURL:
+    my_url.initWithString_relativeToURL_("something/", "https://example.com/")
+
+This can result in very long method names; so Rubicon also provides an alternate
+mapping for methods, using Python keyword arguments. In this approach, the first
+argument is handled as a positional argument, and all subsequent arguments are
+handled as keyword arguments, with the underscore suffixes being omitted. The
+last method in the previous example could also be invoked as:
+
+.. code-block:: python
+
+    # Invoke -initWithString:relativeToURL:
+    my_url.initWithString("something/", relativeToURL="https://example.com/")
+
+Keyword arguments *must* be passed in the order they are defined in the
+selector. For example, if you were invoking
+``-initFileURLWithPath:isDirectory:relativeToURL``, it *must* be invoked as:
+
+.. code-block:: python
+
+    # Invoke -initFileURLWithPath:isDirectory:relativeToURL
+    my_url.initFileURLWithPath(
+        "something/",
+        isDirectory=True,
+        relativeToURL="file:///Users/brutus/"
+    )
+
+Even though from a strict *Python* perspective, passing ``relativeToURL`` before
+``isDirectory`` would be syntactically equivalent, this *will not* match the
+corresponding Objective-C selector.
+
+This "interleaved" keyword syntax works for *most* Objective-C selectors without
+any problem. However, Objective-C allows arguments in a selector to be repeated.
+For example, ``NSLayoutConstraint`` defines a
+``+constraintWithItem:attribute:relatedBy:toItem:attribute:multiplier:constant:``
+selector, duplicating the ``attribute`` keyword. Python will not allow a keyword
+argument to be duplicated, so to reach selectors of this type, Rubicon allows
+any keyword argument to be appended with a ``__`` suffix to generate a name that
+is unique in the Python code:
+
+.. code-block:: python
+
+    # Invoke +constraintWithItem:attribute:relatedBy:toItem:attribute:multiplier:constant:
+    NSLayoutConstraint.constraintWithItem(
+        first_item,
+        attribute__1=first_attribute,
+        relatedBy=relation,
+        toItem=second_item,
+        attribute__2=second_attribute,
+        multiplier=2.0,
+        constant=1.0
+    )
+
+The name used after the ``__`` has no significance - it is only used to ensure
+that the Python keyword is unique, and is immediately stripped and ignored. By
+convention, we recommend using integers as we've done in this example; but you
+*can* use any unique text you want. For example, ``attribute__from`` and
+``attribute__to`` would also work in this situation, as would ``attribute`` and
+``atribute__to`` (as the names are unique in the Python namespace).
+
 .. _python_style_apis_for_objc:
 
 Python-style APIs and methods for Objective-C objects
@@ -128,16 +209,16 @@ Strings
 :class:`str` objects - they can be sliced, concatenated, compared, etc. with
 other Objective-C and Python strings.
 
-.. code-block:: python
+.. code-block:: pycon
 
     # Call an Objective-C method that returns a string.
     # We're using NSBundle to give us a string version of a path
     >>> NSBundle.mainBundle.bundlePath
-    <rubicon.objc.collections.ObjCStrInstance 0x114a94d68: __NSCFString at 0x7fec8ba7fbd0: /Users/brutus/path/to/somewhere>
+    <ObjCStrInstance: __NSCFString at 0x114a94d68: /Users/brutus/path/to/somewhere>
 
     # Slice the Objective-C string
     >>> NSBundle.mainBundle.bundlePath[:14]
-    <rubicon.objc.collections.ObjCStrInstance 0x114aa80f0: __NSCFString at 0x7fec8ba7fbd0: /Users/brutus/>
+    <ObjCStrInstance: __NSCFString at 0x114aa80f0: /Users/brutus/>
 
 .. note::
 
@@ -153,7 +234,7 @@ a method that does a specific type check for :class:`str`, you can use
 ``str(nsstring)`` to convert the :class:`~rubicon.objc.api.NSString` to
 :class:`str`:
 
-.. code-block:: python
+.. code-block:: pycon
 
     # Convert the Objective-C string to a Python string.
     >>> str(NSBundle.mainBundle.bundlePath)
@@ -164,14 +245,14 @@ Conversely, if you have a :class:`str`, and you specifically require a
 :func:`~rubicon.objc.api.at` function to convert the Python instance to an
 :class:`~rubicon.objc.api.NSString`.
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> from rubicon.objc import at
     # Create a Python string
     >>> py_str = 'hello world'
     # Convert to an Objective-C string
     >>> at(py_str)
-    <rubicon.objc.collections.ObjCStrInstance 0x114a94e48: __NSCFString at 0x7fec8ba7fc10: hello world>
+    <ObjCStrInstance: __NSCFString at 0x114a94e48: hello world>
 
 :class:`~rubicon.objc.api.NSString` also supports all the utility methods that
 are available on :class:`str`, such as ``replace`` and ``split``. When these
@@ -181,7 +262,7 @@ the return value from these methods, you should always use :class:`str` or
 :func:`~rubicon.objc.api.at` to ensure that you have the right kind of string
 for your needs.
 
-.. code-block:: python
+.. code-block:: pycon
 
     # Is the path comprised of all lowercase letters? (Hint: it isn't)
     >>> NSBundle.mainBundle.bundlePath.islower()
@@ -209,14 +290,14 @@ Lists
 sequence - they can be indexed, sliced, etc. and standard operations like
 :func:`len` and ``in`` are supported:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> from rubicon.objc import NSArray
     >>> array = NSArray.arrayWithArray(list(range(4)))
     >>> array[0]
     0
     >>> array[1:3]
-    <rubicon.objc.collections.ObjCListInstance 0x10b855208: __NSArrayI at 0x7f86f8e61950: <__NSArrayI 0x7f86f8e61950>(
+    <ObjCListInstance: _NSArrayI at 0x10b855208: <__NSArrayI 0x7f86f8e61950>(
     1,
     2
     )
@@ -241,13 +322,13 @@ sequence - they can be indexed, sliced, etc. and standard operations like
 :class:`~rubicon.objc.api.NSMutableArray` objects additionally support mutating
 operations, like item and slice assignment:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> from rubicon.objc import NSMutableArray
     >>> mutarray = NSMutableArray.arrayWithArray(list(range(4)))
     >>> mutarray[0] = 42
     >>> mutarray
-    <rubicon.objc.collections.ObjCMutableListInstance 0x10b8558d0: __NSArrayM at 0x7f86fb04d9f0: <__NSArrayM 0x7f86fb04d9f0>(
+    <ObjCMutableListInstance: __NSArrayM at 0x10b8558d0: <__NSArrayM 0x7f86fb04d9f0>(
     42,
     1,
     2,
@@ -256,7 +337,7 @@ operations, like item and slice assignment:
     >
     >>> mutarray[1:3] = [9, 8, 7]
     >>> mutarray
-    <rubicon.objc.collections.ObjCMutableListInstance 0x10b8558d0: __NSArrayM at 0x7f86fb04d9f0: <__NSArrayM 0x7f86fb04d9f0>(
+    <ObjCMutableListInstance: __NSArrayM at 0x10b8558d0: <__NSArrayM 0x7f86fb04d9f0>(
     42,
     9,
     8,
@@ -267,7 +348,7 @@ operations, like item and slice assignment:
 
 Sequence methods like ``index`` and ``pop`` are also supported:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> mutarray.index(7)
     3
@@ -287,7 +368,7 @@ Dictionaries
 mapping - their items can be accessed and standard operations like :func:`len`
 and ``in`` are supported:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> from rubicon.objc import NSDictionary
     >>> d = objc.NSDictionary.dictionaryWithDictionary({"one": 1, "two": 2})
@@ -313,12 +394,12 @@ and ``in`` are supported:
 :class:`~rubicon.objc.api.NSMutableDictionary` objects additionally support
 mutating operations, like item assignment:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> md = objc.NSMutableDictionary.dictionaryWithDictionary({"one": 1, "two": 2})
     >>> md["three"] = 3
     >>> md
-    <rubicon.objc.collections.ObjCMutableDictInstance 0x10b8a7860: __NSDictionaryM at 0x7f86fb164b60: {
+    <ObjCMutableDictInstance: __NSDictionaryM at 0x10b8a7860: {
         one = 1;
         three = 3;
         two = 2;
@@ -326,16 +407,16 @@ mutating operations, like item assignment:
 
 Mapping methods like ``keys`` and ``values`` are also supported:
 
-.. code-block:: python
+.. code-block:: pycon
 
     >>> d.keys()
-    <rubicon.objc.collections.ObjCListInstance 0x10b898a90: __NSArrayI at 0x7f86f8db6b70: <__NSArrayI 0x7f86f8db6b70>(
+    <ObjCListInstance: __NSArrayI at 0x10b898a90: <__NSArrayI 0x7f86f8db6b70>(
     one,
     two
     )
     >
     >>> d.values()
-    <rubicon.objc.collections.ObjCListInstance 0x10b8a7b38: __NSArrayI at 0x7f86f8c00370: <__NSArrayI 0x7f86f8c00370>(
+    <ObjCListInstance: __NSArrayI at 0x10b8a7b38: <__NSArrayI 0x7f86f8c00370>(
     1,
     2
     )

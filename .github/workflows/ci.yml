@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_call:
+    inputs:
+      attest-package:
+        description: "Create GitHub provenance attestation for the package."
+        default: "false"
+        type: string
     outputs:
       artifact-name:
         description: "Name of the uploaded artifact; use for artifact retrieval."
@@ -12,8 +17,15 @@ on:
 
 # Cancel active CI runs for a PR before starting another run
 concurrency:
-  group: ${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  FORCE_COLOR: "1"
 
 jobs:
   pre-commit:
@@ -29,14 +41,18 @@ jobs:
       runner-os: "macos-latest"
 
   package:
-    name: Python Package
+    name: Package Rubicon-ObjC
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
     uses: beeware/.github/.github/workflows/python-package-create.yml@main
     with:
-      runner-os: "macos-latest"
+      attest: ${{ inputs.attest-package }}
 
   unit-tests:
     name: Unit tests
-    needs: [pre-commit, towncrier, package]
+    needs: [ pre-commit, towncrier, package ]
     runs-on: ${{ matrix.platform }}
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -44,7 +60,7 @@ jobs:
       matrix:
         platform: [
           # X86-64 runners
-          "macos-11", "macos-12", "macos-13",
+          "macos-12", "macos-13",
           # M1 runners
           "macos-14"
         ]
@@ -64,27 +80,26 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4.1.2
+      uses: actions/checkout@v4.1.7
       with:
         fetch-depth: 0
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5.0.0
+      uses: actions/setup-python@v5.1.0
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Get packages
-      uses: actions/download-artifact@v4.1.4
+      uses: actions/download-artifact@v4.1.7
       with:
         name: ${{ needs.package.outputs.artifact-name }}
         path: dist
 
-    - name: Install dev dependencies
-      run: |
-        # We don't actually want to install rubicon;
-        # we just want the dev extras so we have a known version of tox.
-        python -m pip install $(ls dist/rubicon_objc-*.whl)[dev]
+    - name: Install Tox
+      uses: beeware/.github/.github/actions/install-requirement@main
+      with:
+        requirements: tox
+        extra: dev
 
     - name: Test
-      run: |
-        tox -e py --installpkg dist/rubicon_objc-*.whl
+      run: tox -e py --installpkg dist/rubicon_objc-*.whl

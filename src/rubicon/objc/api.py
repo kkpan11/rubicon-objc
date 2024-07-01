@@ -137,7 +137,7 @@ class ObjCMethod:
         self.method_argtypes = self.imp_argtypes[2:]
 
     def __repr__(self):
-        return f"<ObjCMethod: {self.name} {self.encoding}>"
+        return f"<{type(self).__qualname__}: {self.name.decode()} {self.encoding.decode()}>"
 
     def __call__(self, receiver, *args, convert_args=True, convert_result=True):
         """Call the method on an object with the given arguments.
@@ -243,31 +243,35 @@ class ObjCPartialMethod:
         self.methods = {}  # Initialized in ObjCClass._load_methods
 
     def __repr__(self):
-        return f"{type(self).__module__}.{type(self).__qualname__}({self.name_start!r})"
+        return f"{type(self).__qualname__}({self.name_start!r})"
 
     def __call__(self, receiver, first_arg=_sentinel, **kwargs):
+        # Ignore parts of argument names after "__".
+        order = tuple(argname.split("__")[0] for argname in kwargs)
+        args = [arg for arg in kwargs.values()]
+
         if first_arg is ObjCPartialMethod._sentinel:
             if kwargs:
                 raise TypeError("Missing first (positional) argument")
-
-            args = []
-            rest = frozenset()
+            rest = order
         else:
-            args = [first_arg]
-            # Add "" to rest to indicate that the method takes arguments
-            rest = frozenset(kwargs) | frozenset(("",))
+            args.insert(0, first_arg)
+            rest = ("",) + order
 
         try:
-            name, order = self.methods[rest]
+            name = self.methods[rest]
         except KeyError:
+            if first_arg is self._sentinel:
+                specified_sel = self.name_start
+            else:
+                specified_sel = f"{self.name_start}:{':'.join(kwargs.keys())}:"
             raise ValueError(
-                f"No method was found starting with {self.name_start!r} and with keywords {set(kwargs)}\n"
-                f"Known keywords are:\n"
-                + "\n".join(repr(keywords) for keywords in self.methods)
-            )
+                f"Invalid selector {specified_sel}. Available selectors are: "
+                f"{', '.join(sel for sel in self.methods.values())}"
+            ) from None
 
         meth = receiver.objc_class._cache_method(name)
-        args += [kwargs[name] for name in order]
+
         return meth(receiver, *args)
 
 
@@ -285,7 +289,7 @@ class ObjCBoundMethod:
             self.receiver = receiver
 
     def __repr__(self):
-        return f"{type(self).__module__}.{type(self).__qualname__}({self.method}, {self.receiver})"
+        return f"{type(self).__qualname__}({self.method}, {self.receiver})"
 
     def __call__(self, *args, **kwargs):
         """Call the method with the given arguments."""
@@ -995,10 +999,10 @@ class ObjCInstance:
 
     def __repr__(self):
         """Get a debugging representation of ``self``, which includes the
-        Objective-C object's address, class, and ``debugDescription``."""
+        Objective-C object's class and ``debugDescription``."""
         return (
-            f"<{type(self).__module__}.{type(self).__qualname__} {id(self):#x}: "
-            f"{self.objc_class.name} at {self.ptr.value:#x}: {self.debugDescription}>"
+            f"<{type(self).__qualname__}: {self.objc_class.name} at "
+            f"{id(self):#x}: {self.debugDescription}>"
         )
 
     def __getattr__(self, name):
@@ -1035,28 +1039,11 @@ class ObjCInstance:
 
         The "interleaved" syntax is usually preferred, since it looks more
         similar to normal Objective-C syntax. However, the "flat" syntax is also
-        fully supported. Certain method names require the "flat" syntax, for
-        example if two arguments have the same label (e.g.
-        ``performSelector:withObject:withObject:``), which is not supported by
-        Python's keyword argument syntax.
-
-        .. warning::
-
-            The "interleaved" syntax currently ignores the ordering of its
-            keyword arguments. However, in the interest of readability, the
-            keyword arguments should always be passed in the same order as they
-            appear in the method name.
-
-            This also means that two methods whose names which differ only in
-            the ordering of their keywords will conflict with each other, and
-            can only be called reliably using "flat" syntax.
-
-            As of Python 3.6, the order of keyword arguments passed to functions
-            is preserved (:pep:`468`). In the future, once Rubicon requires
-            Python 3.6 or newer, "interleaved" method calls will respect keyword
-            argument order. This will fix the kind of conflict described above,
-            but will also disallow specifying the keyword arguments out of
-            order.
+        fully supported. If two arguments have the same name (e.g.
+        ``performSelector:withObject:withObject:``), you can use ``__`` in the
+        keywords to disambiguate (e.g., ``performSelector(..., withObject__1=...,
+        withObject__2=...)``. Any content after and including the ``__`` in an argument
+        will be ignored.
         """
         # Search for named instance method in the class object and if it
         # exists, return callable object with self as hidden argument.
@@ -1090,7 +1077,7 @@ class ObjCInstance:
         else:
             method = None
 
-        if method is None or set(method.methods) == {frozenset()}:
+        if method is None or set(method.methods) == {()}:
             # Find a method whose full name matches the given name if no partial
             # method was found, or the partial method can only resolve to a
             # single method that takes no arguments. The latter case avoids
@@ -1206,6 +1193,10 @@ class ObjCClass(ObjCInstance, type):
         protocols_ptr = libobjc.class_copyProtocolList(self, byref(out_count))
         return tuple(ObjCProtocol(protocols_ptr[i]) for i in range(out_count.value))
 
+    auto_rename = False
+    """A :any:`bool` value describing whether a defined class should be renamed automatically
+    if a class with the same name already exists in the Objective C runtime."""
+
     @classmethod
     def _new_from_name(cls, name):
         name = ensure_bytes(name)
@@ -1229,11 +1220,20 @@ class ObjCClass(ObjCInstance, type):
         return ptr, name
 
     @classmethod
-    def _new_from_class_statement(cls, name, bases, attrs, *, protocols):
+    def _new_from_class_statement(cls, name, bases, attrs, *, protocols, auto_rename):
+        basename = name
         name = ensure_bytes(name)
 
         if get_class(name).value is not None:
-            raise RuntimeError(f"An Objective-C class named {name!r} already exists")
+            if auto_rename or auto_rename is None and cls.auto_rename:
+                suffix = 1
+                while get_class(name).value is not None:
+                    suffix += 1
+                    name = f"{basename}_{suffix}".encode()
+            else:
+                raise RuntimeError(
+                    f"An Objective-C class named {name!r} already exists"
+                )
 
         try:
             (superclass,) = bases
@@ -1316,7 +1316,15 @@ class ObjCClass(ObjCInstance, type):
 
         return ptr, name, attrs
 
-    def __new__(cls, name_or_ptr, bases=None, attrs=None, *, protocols=()):
+    def __new__(
+        cls,
+        name_or_ptr,
+        bases=None,
+        attrs=None,
+        *,
+        protocols=(),
+        auto_rename=None,
+    ):
         """The constructor accepts either the name of an Objective-C class to
         look up (as :class:`str` or :class:`bytes`), or a pointer to an existing
         class object (in any form accepted by :class:`ObjCInstance`).
@@ -1336,6 +1344,14 @@ class ObjCClass(ObjCInstance, type):
         extended by the new class. An optional ``protocols`` keyword argument is
         also accepted, which must be a sequence of :class:`ObjCProtocol`\\s for
         the new class to adopt.
+
+        If the name of the class has already registered with the Objective C
+        runtime, the ``auto_rename`` option can be used to ensure that the
+        Objective C name for the new class will be unique. A numeric suffix will
+        be appended to the Objective C name to ensure uniqueness (for example,
+        ``MyClass`` will be renamed to ``MyClass_2``, ``MyClass_3`` etc until a
+        unique name is found). By default, classes will *not* be renamed, unless
+        :attr:`ObjCClass.auto_rename` is set at the class level.
         """
 
         if (bases is None) ^ (attrs is None):
@@ -1362,7 +1378,11 @@ class ObjCClass(ObjCInstance, type):
                     return ObjCMetaClass(ptr)
         else:
             ptr, name, attrs = cls._new_from_class_statement(
-                name_or_ptr, bases, attrs, protocols=protocols
+                name_or_ptr,
+                bases,
+                attrs,
+                protocols=protocols,
+                auto_rename=auto_rename,
             )
 
         objc_class_name = name.decode("utf-8")
@@ -1557,7 +1577,7 @@ class ObjCClass(ObjCInstance, type):
         self.objc_class.forced_properties.add(name)
 
     def __repr__(self):
-        return f"<{type(self).__module__}.{type(self).__qualname__}: {self.name} at {self.ptr.value:#x}>"
+        return f"<{type(self).__qualname__}: {self.name}>"
 
     def __str__(self):
         return f"{type(self).__name__}({self.name!r})"
@@ -1609,11 +1629,13 @@ class ObjCClass(ObjCInstance, type):
 
         if self.superclass is not None:
             if self.superclass.methods_ptr is None:
-                self.superclass._load_methods()
+                with self.superclass.cache_lock:
+                    self.superclass._load_methods()
 
             # Prime this class' partials list with a list from the superclass.
             for first, superpartial in self.superclass.partial_methods.items():
-                partial = self.partial_methods[first] = ObjCPartialMethod(first)
+                partial = ObjCPartialMethod(first)
+                self.partial_methods[first] = partial
                 partial.methods.update(superpartial.methods)
 
         for i in range(methods_ptr_count.value):
@@ -1621,20 +1643,24 @@ class ObjCClass(ObjCInstance, type):
             name = libobjc.method_getName(method).name.decode("utf-8")
             self.instance_method_ptrs[name] = method
 
-            first, *rest = name.split(":")
-            # Selectors end in a colon iff the method takes arguments.
-            # Because of this, rest must either be empty (method takes no arguments)
-            # or the last element must be an empty string (method takes arguments).
-            assert not rest or rest[-1] == ""
+            # Selectors end with a colon if the method takes arguments.
+            if name.endswith(":"):
+                first, *rest, _ = name.split(":")
+                # Insert an empty string in order to indicate that the method
+                # takes a first argument as a positional argument.
+                rest.insert(0, "")
+                rest = tuple(rest)
+            else:
+                first = name
+                rest = ()
 
             try:
                 partial = self.partial_methods[first]
             except KeyError:
-                partial = self.partial_methods[first] = ObjCPartialMethod(first)
+                partial = ObjCPartialMethod(first)
+                self.partial_methods[first] = partial
 
-            # order is rest without the dummy "" part
-            order = rest[:-1]
-            partial.methods[frozenset(rest)] = (name, order)
+            partial.methods[rest] = name
 
         # Set the list of methods for the class to the computed list.
         self.methods_ptr = methods_ptr
@@ -1852,7 +1878,11 @@ class ObjCProtocol(ObjCInstance):
         protocols_ptr = libobjc.protocol_copyProtocolList(self, byref(out_count))
         return tuple(ObjCProtocol(protocols_ptr[i]) for i in range(out_count.value))
 
-    def __new__(cls, name_or_ptr, bases=None, ns=None):
+    auto_rename = False
+    """A :class:`bool` value whether a defined protocol should be renamed
+    automatically if a protocol with the same name is already exists."""
+
+    def __new__(cls, name_or_ptr, bases=None, ns=None, auto_rename=None):
         """The constructor accepts either the name of an Objective-C protocol
         to look up (as :class:`str` or :class:`bytes`), or a pointer to an
         existing protocol object (in any form accepted by
@@ -1870,6 +1900,15 @@ class ObjCProtocol(ObjCInstance):
         :ref:`custom-classes-and-protocols`). The bases list can contain any
         number of :class:`ObjCProtocol` objects to be extended by the new
         protocol.
+
+        If the name of the protocol has already registered with the Objective C
+        runtime, the ``auto_rename`` option can be used to ensure that the
+        Objective C name for the new protocol will be unique. A numeric suffix
+        will be appended to the Objective C name to ensure uniqueness (for
+        example, ``MyProtocol`` will be renamed to ``MyProtocol_2``,
+        ``MyProtocol_3`` etc until a unique name is found). By default,
+        protocols will *not* be renamed, unless
+        :attr:`ObjCProtocol.auto_rename` is set at the class level.
         """
 
         if (bases is None) ^ (ns is None):
@@ -1892,12 +1931,20 @@ class ObjCProtocol(ObjCInstance):
                         f"Pointer {ptr} ({ptr.value:#x}) does not refer to a protocol"
                     )
         else:
+            basename = name_or_ptr
             name = ensure_bytes(name_or_ptr)
 
+            # Rename the protocol that will be defined if the auto_rename option is True.
             if libobjc.objc_getProtocol(name).value is not None:
-                raise RuntimeError(
-                    f"An Objective-C protocol named {name!r} already exists"
-                )
+                if auto_rename or auto_rename is None and cls.auto_rename:
+                    suffix = 1
+                    while libobjc.objc_getProtocol(name).value is not None:
+                        suffix += 1
+                        name = f"{basename}_{suffix}".encode()
+                else:
+                    raise RuntimeError(
+                        f"An Objective-C protocol named {name!r} already exists"
+                    )
 
             # Check that all bases are protocols.
             for base in bases:
@@ -1927,7 +1974,7 @@ class ObjCProtocol(ObjCInstance):
         return super().__new__(cls, ptr)
 
     def __repr__(self):
-        return f"<{type(self).__module__}.{type(self).__qualname__}: {self.name} at {self.ptr.value:#x}>"
+        return f"<{type(self).__qualname__}: {self.name}>"
 
     def __instancecheck__(self, instance):
         """Check whether the given object conforms to this protocol.

@@ -986,6 +986,61 @@ class RubiconTest(unittest.TestCase):
         )
         self.assertEqual(buf.value.decode("utf-8"), pystring)
 
+    def test_partial_method_arg_order(self):
+        Example = ObjCClass("Example")
+
+        self.assertEqual(Example.overloaded(3, extraArg1=5, extraArg2=7), 3 + 5 + 7)
+        self.assertEqual(Example.overloaded(3, extraArg2=5, extraArg1=7), 3 * 5 * 7)
+
+        # Although the arguments are a unique match, they're not in the right order.
+        with self.assertRaises(ValueError):
+            Example.overloaded(0, orderedArg2=0, orderedArg1=0)
+
+    def test_partial_method_duplicate_arg_names(self):
+        Example = ObjCClass("Example")
+        self.assertEqual(
+            Example.overloaded(24, duplicateArg__a=16, duplicateArg__b=6),
+            24 + 2 * 16 + 3 * 6,
+        )
+
+    def test_partial_method_exception(self):
+        Example = ObjCClass("Example")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Invalid selector overloaded:invalidArgument:. Available selectors are: "
+            "overloaded, overloaded:, overloaded:extraArg:, "
+            "overloaded:extraArg1:extraArg2:, overloaded:extraArg2:extraArg1:, "
+            "overloaded:orderedArg1:orderedArg2:, overloaded:duplicateArg:duplicateArg:",
+        ):
+            Example.overloaded(0, invalidArgument=0)
+
+    def test_objcmethod_str_repr(self):
+        """Test ObjCMethod, ObjCPartialMethod, and ObjCBoundMethod str and repr"""
+
+        obj = NSObject.new()
+
+        # ObjCMethod
+        self.assertEqual(repr(obj.init.method), "<ObjCMethod: init @16@0:8>")
+        self.assertEqual(str(obj.init.method), "<ObjCMethod: init @16@0:8>")
+
+        # ObjCBoundMethod
+        self.assertRegex(
+            repr(obj.init),
+            r"ObjCBoundMethod\(<ObjCMethod: init @16@0:8>, <NSObject: 0x[0-9a-f]+>\)",
+        )
+        self.assertRegex(
+            str(obj.init),
+            r"ObjCBoundMethod\(<ObjCMethod: init @16@0:8>, <NSObject: 0x[0-9a-f]+>\)",
+        )
+
+        # ObjCPartialMethod
+        self.assertEqual(
+            repr(obj.performSelector.method), "ObjCPartialMethod('performSelector')"
+        )
+        self.assertEqual(
+            str(obj.performSelector.method), "ObjCPartialMethod('performSelector')"
+        )
+
     def test_objcinstance_str_repr(self):
         """An ObjCInstance's str and repr contain the object's description and
         debugDescription, respectively."""
@@ -997,8 +1052,15 @@ class RubiconTest(unittest.TestCase):
             py_description_string,
             debugDescriptionString=py_debug_description_string,
         )
+
+        # Check str
         self.assertEqual(str(tester), py_description_string)
-        self.assertIn(py_debug_description_string, repr(tester))
+
+        # Check repr
+        self.assertEqual(
+            repr(tester),
+            f"<ObjCInstance: DescriptionTester at {hex(id(tester))}: {py_debug_description_string}>",
+        )
 
     def test_objcinstance_str_repr_with_nil_descriptions(self):
         """An ObjCInstance's str and repr work even if description and
@@ -1010,6 +1072,17 @@ class RubiconTest(unittest.TestCase):
         )
         self.assertIsNot(str(tester), None)
         self.assertIsNot(repr(tester), None)
+
+    def test_objcclass_repr(self):
+        """Test ObjCClass repr and str return correct value."""
+
+        self.assertEqual(repr(NSObject), "<ObjCClass: NSObject>")
+        self.assertEqual(str(NSObject), "ObjCClass('NSObject')")
+
+    def test_objcprotocol_repr(self):
+        """Test ObjCProtocol repr return correct value."""
+
+        self.assertEqual(repr(NSObjectProtocol), "<ObjCProtocol: NSObject>")
 
     def test_nspoint_repr(self):
         """Test NSPoint repr and str returns correct value."""
@@ -1117,6 +1190,115 @@ class RubiconTest(unittest.TestCase):
 
             class MyClass(NSObject):  # noqa: F811
                 pass
+
+    def test_class_auto_rename_global(self):
+        """Test the global automatic renaming option of ObjCClass."""
+
+        try:
+            ObjCClass.auto_rename = True
+
+            class TestGlobalRenamedClass(NSObject):
+                @objc_method
+                def oldMethod(self):
+                    pass
+
+            class1 = TestGlobalRenamedClass
+
+            class TestGlobalRenamedClass_2(NSObject):
+                pass
+
+            class TestGlobalRenamedClass(NSObject):  # noqa: F811
+                @objc_method
+                def testMethod(self):
+                    return "TEST1"
+
+            # Check that the class was renamed
+            self.assertEqual(TestGlobalRenamedClass.name, "TestGlobalRenamedClass_3")
+            self.assertIsNot(class1, TestGlobalRenamedClass)
+
+            # Check that methods are updated
+            obj = TestGlobalRenamedClass.new()
+            with self.assertRaises(AttributeError):
+                obj.oldMethod()
+            self.assertEqual(obj.testMethod(), "TEST1")
+
+        finally:
+            ObjCClass.auto_rename = False
+
+    def test_class_auto_rename_per_class(self):
+        """Test the per-class automatic renaming option of ObjCClass."""
+
+        class TestLocalRenamedClass(NSObject):
+            @objc_method
+            def oldMethod(self):
+                pass
+
+        class1 = TestLocalRenamedClass
+
+        class TestLocalRenamedClass_2(NSObject):
+            pass
+
+        class TestLocalRenamedClass(NSObject, auto_rename=True):  # noqa: F811
+            @objc_method
+            def testMethod(self):
+                return "TEST2"
+
+        # Check that the class was renamed
+        self.assertEqual(TestLocalRenamedClass.name, "TestLocalRenamedClass_3")
+        self.assertIsNot(class1, TestLocalRenamedClass)
+
+        # Check that methods are updated
+        obj = TestLocalRenamedClass.new()
+        with self.assertRaises(AttributeError):
+            obj.oldMethod()
+        self.assertEqual(obj.testMethod(), "TEST2")
+
+    def test_protocol_auto_rename_global(self):
+        """Test the global automatic renaming option of ObjCProtocol."""
+
+        try:
+            ObjCProtocol.auto_rename = True
+
+            class TestGlobalRenamedProtocol(metaclass=ObjCProtocol):
+                pass
+
+            protocol1 = TestGlobalRenamedProtocol
+
+            class TestGlobalRenamedProtocol_2(metaclass=ObjCProtocol):
+                pass
+
+            class TestGlobalRenamedProtocol(metaclass=ObjCProtocol):  # noqa: F811
+                pass
+
+            # Check that the protocol was renamed
+            self.assertEqual(
+                TestGlobalRenamedProtocol.name, "TestGlobalRenamedProtocol_3"
+            )
+            self.assertIsNot(protocol1, TestGlobalRenamedProtocol)
+
+        finally:
+            ObjCProtocol.auto_rename = False
+
+    def test_protocol_auto_rename_per_class(self):
+        """Test the per-protocol automatic renaming option of ObjCProtocol."""
+
+        class TestLocalRenamedProtocol(metaclass=ObjCProtocol):
+            pass
+
+        protocol1 = TestLocalRenamedProtocol
+
+        class TestLocalRenamedProtocol_2(metaclass=ObjCProtocol):
+            pass
+
+        class TestLocalRenamedProtocol(
+            metaclass=ObjCProtocol,
+            auto_rename=True,
+        ):  # noqa: F811
+            pass
+
+        # Check that the protocol was renamed
+        self.assertEqual(TestLocalRenamedProtocol.name, "TestLocalRenamedProtocol_3")
+        self.assertIsNot(protocol1, TestLocalRenamedProtocol)
 
     def test_interface(self):
         """An ObjC protocol implementation can be defined in Python."""
