@@ -1,7 +1,7 @@
 [build-system]
 requires = [
-    "setuptools==69.2.0",
-    "setuptools_scm==8.0.4",
+    "setuptools==84.2.1",
+    "setuptools_scm==10.3.4",
 ]
 build-backend = "setuptools.build_meta"
 
@@ -9,9 +9,12 @@ build-backend = "setuptools.build_meta"
 dynamic = ["version"]
 name = "rubicon-objc"
 description = "A bridge between an Objective C runtime environment and Python."
-readme = "README.rst"
-requires-python = ">= 3.8"
-license.text = "New BSD"
+readme = "README.md"
+requires-python = ">= 3.11"
+license = "BSD-3-Clause"
+license-files = [
+    "LICENSE",
+]
 authors = [
     {name="Russell Keith-Magee", email="russell@keith-magee.com"},
 ]
@@ -26,15 +29,14 @@ keywords = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
     "Programming Language :: Objective C",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: 3.16",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Software Development",
 ]
@@ -46,40 +48,196 @@ Documentation = "https://rubicon-objc.readthedocs.io/en/latest/"
 Tracker = "https://github.com/beeware/rubicon-objc/issues"
 Source = "https://github.com/beeware/rubicon-objc"
 
-[project.optional-dependencies]
+[dependency-groups]
+briefcase = [
+    "briefcase @ git+https://github.com/beeware/briefcase",
+]
+
+pre-commit = [
+    "pre-commit == 4.7.0",
+]
+
+setuptools-scm = [
+    "setuptools_scm==10.3.4",
+]
+
+towncrier = [
+    "towncrier==26.9.0",
+]
+
+tox-uv = [
+    "tox-uv == 1.37.3",
+]
+
+test = [
+    "coverage[toml] == 7.17.0",
+    "coverage-conditional-plugin == 0.9.0",
+    "pytest == 9.2.0",
+]
+
 dev = [
-    # Pre-commit 3.6.0 deprecated support for Python 3.8
-    "pre-commit == 3.5.0 ; python_version < '3.9'",
-    "pre-commit == 3.7.0 ; python_version >= '3.9'",
-    "pytest == 8.1.1",
-    "pytest-tldr == 0.2.5",
-    "setuptools_scm == 8.0.4",
-    "tox == 4.14.2",
+    {include-group = "pre-commit"},
+    {include-group = "setuptools-scm"},
+    {include-group = "tox-uv"},
 ]
+
+# Docs are always built on a specific Python version; see RTD and tox config files,
+# and the docs contribution guide.
 docs = [
-    "furo == 2024.1.29",
-    "pyenchant == 3.2.2",
-    # Sphinx 7.2 deprecated support for Python 3.8
-    "sphinx == 7.1.2 ; python_version < '3.9'",
-    "sphinx == 7.2.6 ; python_version >= '3.9'",
-    "sphinx_tabs == 3.4.5",
-    # Sphinx 2024.2.4 deprecated support for Python 3.8
-    "sphinx-autobuild == 2021.3.14 ; python_version < '3.9'",
-    "sphinx-autobuild == 2024.2.4 ; python_version >= '3.9'",
-    "sphinx-copybutton == 0.5.2",
-    "sphinxcontrib-spelling == 8.0.0",
+    "beeware-docs-tools @ git+https://github.com/beeware/beeware-docs-tools",
+    # "beeware-docs-tools @ file://../beeware-docs-tools",
 ]
+
+[tool.briefcase]
+project_name = "Rubicon ObjC Testbed"
+bundle = "org.beeware"
+
+[tool.briefcase.app.testbed]
+formal_name = "Rubicon ObjC Testbed"
+description = "A testbed for Rubicon ObjC"
+long_description = """More details about the app should go here.
+"""
+sources = [
+    "testbed/testbed",
+]
+test_sources = [
+    "tests",
+]
+
+requires = [
+    "rubicon-objc",
+]
+test_requires = [
+    "pytest == 9.2.0"
+]
+requirement_installer_args = ["--pre", "-f", "./dist"]
+
+[tool.briefcase.app.testbed.macOS]
+supported = true
+
+[tool.briefcase.app.testbed.linux]
+supported = false
+
+[tool.briefcase.app.testbed.windows]
+supported = false
+
+# Mobile deployments
+[tool.briefcase.app.testbed.iOS]
+supported = true
+
+[tool.briefcase.app.testbed.android]
+supported = false
+
+# Web deployments
+[tool.briefcase.app.testbed.web]
+supported = false
 
 [tool.codespell]
 skip = ".git,*.pdf,*.svg"
-# the way to make case sensitive skips of words etc
+# the way to make case-sensitive skips of words etc
 ignore-regex = "\bNd\b"
-ignore-words-list = "re-use"
+ignore-words-list = "re-use,assertIn"
 
-[tool.isort]
-profile = "black"
-split_on_trailing_comma = true
-combine_as_imports = true
+[tool.coverage.run]
+plugins = ["coverage_conditional_plugin"]
+parallel = true
+branch = true
+relative_files = true
+source_pkgs = ["rubicon"]
+
+[tool.coverage.paths]
+source = [
+    "src",
+    "**/site-packages",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+skip_empty = true
+precision = 1
+exclude_lines = [
+    "pragma: no cover",
+    "@(abc\\.)?abstractmethod",
+    "@runtime_checkable",
+    "NotImplementedError\\(\\)",
+    "if TYPE_CHECKING:",
+]
+
+[tool.coverage.coverage_conditional_plugin.rules]
+no-cover-if-missing-setuptools_scm = "not is_installed('setuptools_scm')"
+no-cover-if-gte-py313 = "sys_version_info >= (3, 13) and os_environ.get('COVERAGE_EXCLUDE_PYTHON_VERSION') != 'disable'"
+no-cover-if-gte-py314 = "sys_version_info >= (3, 14) and os_environ.get('COVERAGE_EXCLUDE_PYTHON_VERSION') != 'disable'"
+no-cover-if-gte-py316 = "sys_version_info >= (3, 16) and os_environ.get('COVERAGE_EXCLUDE_PYTHON_VERSION') != 'disable'"
+no-cover-if-lt-py313 = "sys_version_info < (3, 13) and os_environ.get('COVERAGE_EXCLUDE_PYTHON_VERSION') != 'disable'"
+no-cover-if-lt-py314 = "sys_version_info < (3, 14) and os_environ.get('COVERAGE_EXCLUDE_PYTHON_VERSION') != 'disable'"
+no-cover-if-lt-py316 = "sys_version_info < (3, 16) and os_environ.get('COVERAGE_EXCLUDE_PYTHON_VERSION') != 'disable'"
+no-cover-if-ios = "sys_platform == 'ios'"
+no-cover-if-not-ios = "sys_platform != 'ios'"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+]
+
+[tool.ruff.lint]
+# In addition to the default rules, these additional rules will be used:
+extend-select = [
+    "E",      # pycodestyle
+    "W",      # pycodestyle
+    "F",      # pyflakes
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "YTT",    # flake8-2020
+    "ASYNC",  # flake8-async
+    "C4",     # flake8-comprehensions
+    "I",      # isort
+    # The SIM rules are *very* opinionated, and don't necessarily make for better code.
+    # They may be worth occasionally turning on just to see if something could actually
+    # use improvement.
+    # "SIM",    # flake8-simplify
+]
+
+[tool.ruff.lint.per-file-ignores]
+# PEP8 module naming conventions aren't appropriate
+"tests/test_NS*.py" = ["N999"]
+"tests/test_ObjC*.py" = ["N999"]
+# Ignores needed to pass the Ruff 0.16 update.
+"src/rubicon/objc/api.py" = ["PLW0642", "RUF012"]
+"tests/conftest.py" = ["BLE001"]
+"tests/test_NSString.py" = ["BLE001", "PLR0124"]
+
+[tool.rumdl]
+flavor = "mkdocs"
+include = ["**/*.md"]
+exclude = []
+respect-gitignore = true
+force-exclude = true
+
+# Disable rules:
+# MD013: Line length - flagging on mkdocstrings content
+# MD014: Forces commands in codeblocks to show output
+# MD042: Empty link - buggy, still flagging on valid MkDocs formatting
+# MD052: Reference link not found - buggy, flagging on valis MkDocs links
+disable = ["MD013", "MD014", "MD042", "MD052"]
+
+[tool.rumdl.per-file-ignores]
+"changes/**/*.md" = ["MD041"]
+
+#[MD013]  # Line length
+#line_length = 999999  # Force reflow to paragraph content to remove linebreaks
+#reflow = true
+#reflow_mode = "normalize"
+
+[tool.rumdl.MD026]  # Remove punctuation at the end of headings
+punctuation = ",;:"
+
+[tool.rumdl.MD033]  # No inline HTML
+allowed_elements = ["nospell",]  # pyspelling inline disable tag
+
+[tool.rumdl.MD046]
+style = "fenced"
 
 [tool.setuptools_scm]
 # To enable SCM versioning, we need an empty tool configuration for setuptools_scm
@@ -87,9 +245,10 @@ combine_as_imports = true
 [tool.towncrier]
 directory = "changes"
 package = "rubicon.objc"
-filename = "docs/background/releases.rst"
-title_format = "{version} ({project_date})"
-template = "changes/template.rst"
+filename = "docs/en/about/releases.md"
+title_format = "## {version} ({project_date})"
+issue_format = "[#{issue}](https://github.com/beeware/rubicon-objc/issues/{issue})"
+template = "changes/template.md"
 type = [
     { directory = "feature", name = "Features", showcontent = true },
     { directory = "bugfix", name = "Bugfixes", showcontent = true },

@@ -27,17 +27,16 @@ NSBackwardsSearch = 4
 
 @for_objcclass(NSString)
 class ObjCStrInstance(ObjCInstance):
-    """Provides Pythonic operations on NSString objects that mimic those of
-    Python's str.
+    """Provides Pythonic operations on NSString objects that mimic those of Python's
+    str.
 
-    Note that str objects consist of Unicode code points, whereas
-    NSString objects consist of UTF-16 code units. These are not
-    equivalent for code points greater than U+FFFF. For performance and
-    simplicity, ObjCStrInstance objects behave as sequences of UTF-16
-    code units, like NSString. (Individual UTF-16 code units are
-    represented as Python str objects of length 1.) If you need to
-    access or iterate over code points instead of UTF-16 code units, use
-    str(nsstring) to convert the NSString to a Python str first.
+    Note that str objects consist of Unicode code points, whereas NSString objects
+    consist of UTF-16 code units. These are not equivalent for code points greater than
+    U+FFFF. For performance and simplicity, ObjCStrInstance objects behave as sequences
+    of UTF-16 code units, like NSString. (Individual UTF-16 code units are represented
+    as Python str objects of length 1.) If you need to access or iterate over code
+    points instead of UTF-16 code units, use str(nsstring) to convert the NSString to a
+    Python str first.
     """
 
     def __str__(self):
@@ -57,21 +56,21 @@ class ObjCStrInstance(ObjCInstance):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-    # Note: We cannot define a __hash__ for NSString objects; doing so would violate the Python convention that
-    # mutable objects should not be hashable. Although we could disallow hashing for NSMutableString objects, this
-    # would make some immutable strings unhashable as well, because immutable strings can have a runtime class that
-    # is a subclass of NSMutableString. This is not just a theoretical possibility - for example, on OS X 10.11,
+    # Note: We cannot define a __hash__ for NSString objects; doing so would violate
+    # the Python convention that mutable objects should not be hashable. Although we
+    # could disallow hashing for NSMutableString objects, this would make some
+    # immutable strings unhashable as well, because immutable strings can have a
+    # runtime class that is a subclass of NSMutableString. This is not just a
+    # theoretical possibility - for example, on OS X 10.11,
     # isinstance(NSString.string(), NSMutableString) is true.
 
     def _compare(self, other, want):
         """Helper method used to implement the comparison operators.
 
-        If other is a str or NSString, it is compared to self, and True
-        or False is returned depending on whether the result is one of
-        the wanted values. If other is not a string, NotImplemented is
-        returned.
+        If other is a str or NSString, it is compared to self, and True or False is
+        returned depending on whether the result is one of the wanted values. If other
+        is not a string, NotImplemented is returned.
         """
-
         if isinstance(other, str):
             ns_other = ns_from_py(other)
         elif isinstance(other, NSString):
@@ -118,10 +117,7 @@ class ObjCStrInstance(ObjCInstance):
                     chars[chars_i] = ord(self[self_i])
                 return NSString.stringWithCharacters(chars, length=len(chars))
         else:
-            if key < 0:
-                index = len(self) + key
-            else:
-                index = key
+            index = (len(self) + key) if key < 0 else key
 
             if index not in range(len(self)):
                 raise IndexError(f"{type(self).__name__} index out of range")
@@ -143,7 +139,7 @@ class ObjCStrInstance(ObjCInstance):
     def __mul__(self, other):
         try:
             count = operator.index(other)
-        except AttributeError:
+        except TypeError:
             return NotImplemented
 
         if count <= 0:
@@ -162,15 +158,17 @@ class ObjCStrInstance(ObjCInstance):
     def _find(self, sub, start=None, end=None, *, reverse):
         if not isinstance(sub, (str, NSString)):
             raise TypeError(
-                f"must be str or NSString, not {type(sub).__module__}.{type(sub).__qualname__}"
+                f"must be str or NSString, not "
+                f"{type(sub).__module__}.{type(sub).__qualname__}"
             )
 
         start, end, _ = slice(start, end).indices(len(self))
 
         if not sub:
-            # Special case: Python considers the empty string to be contained in every string,
-            # at the earliest position searched. NSString considers the empty string to *not* be
-            # contained in any string. This difference is handled here.
+            # Special case: Python considers the empty string to be contained
+            # in every string, at the earliest position searched. NSString
+            # considers the empty string to *not* be contained in any string.
+            # This difference is handled here.
             return end if reverse else start
 
         options = NSLiteralSearch
@@ -225,10 +223,7 @@ class ObjCListInstance(ObjCInstance):
                     [self.objectAtIndex(x) for x in range(start, stop, step)]
                 )
         else:
-            if item < 0:
-                index = len(self) + item
-            else:
-                index = item
+            index = (len(self) + item) if item < 0 else item
 
             if index not in range(len(self)):
                 raise IndexError(f"{type(self).__name__} index out of range")
@@ -288,13 +283,10 @@ class ObjCMutableListInstance(ObjCListInstance):
                         f"to extended slice of size {len(indices)}"
                     )
 
-                for idx, obj in zip(indices, arr):
+                for idx, obj in zip(indices, arr, strict=True):
                     self.replaceObjectAtIndex(idx, withObject=obj)
         else:
-            if item < 0:
-                index = len(self) + item
-            else:
-                index = item
+            index = (len(self) + item) if item < 0 else item
 
             if index not in range(len(self)):
                 raise IndexError(f"{type(self).__name__} assignment index out of range")
@@ -310,10 +302,7 @@ class ObjCMutableListInstance(ObjCListInstance):
                 for idx in sorted(range(start, stop, step), reverse=True):
                     self.removeObjectAtIndex(idx)
         else:
-            if item < 0:
-                index = len(self) + item
-            else:
-                index = item
+            index = (len(self) + item) if item < 0 else item
 
             if index not in range(len(self)):
                 raise IndexError(f"{type(self).__name__} assignment index out of range")

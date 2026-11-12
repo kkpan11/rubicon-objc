@@ -30,6 +30,7 @@ from ctypes import (
 )
 
 __all__ = [
+    "__LP64__",
     "CFIndex",
     "CFRange",
     "CGFloat",
@@ -60,13 +61,12 @@ __all__ = [
     "UIEdgeInsetsZero",
     "UniChar",
     "UnknownPointer",
-    "__LP64__",
     "__arm64__",
     "__arm__",
     "__i386__",
     "__x86_64__",
-    "compound_value_for_sequence",
     "c_ptrdiff_t",
+    "compound_value_for_sequence",
     "ctype_for_encoding",
     "ctype_for_type",
     "ctypes_for_method_encoding",
@@ -88,27 +88,23 @@ __all__ = [
     "with_preferred_encoding",
 ]
 
-__LP64__ = 8 * struct.calcsize("P") == 64
+# check-docstring-is-first made us do this
+if True:
+    __LP64__ = 8 * struct.calcsize("P") == 64
+    """Indicates whether the current environment is 64-bit.
+
+    If true, C `long`s and pointers are 64 bits in size, otherwise 32 bits.
+    """
 
 # platform.processor() describes the CPU on which the code is running.
-#   * On a 64-bit Intel machine it is always "x86_64", even if Python is built as 32-bit.
+#   * On a 64-bit Intel machine it is always "x86_64", even if Python is built as 32-bit
 #   * M1 MacBooks return "arm"
 #   * iPhones (as of the late 2022 support packages) return "arm64"
-# This *won't* work on older iOS support builds, as it relies on the customized
-# platform values added in https://github.com/beeware/Python-Apple-support/commit/2f42105838ab8f6f7e703ddb929d97758a36145e  # noqa: E501
 _processor = platform.processor()
 _any_x86 = _processor in ("i386", "x86_64")
+_any_arm = _processor.startswith("arm")
 __i386__ = _any_x86 and not __LP64__
 __x86_64__ = _any_x86 and __LP64__
-
-if _processor:
-    _any_arm = _processor.startswith("arm")
-else:
-    # Fallback when running on iOS without the support package,
-    # where platform.processor() is an empty string
-    # and the "model" field of uname/platform doesn't indicate the processor architecture.
-    # In that case, look for the architecture in the kernel version string.
-    _any_arm = "ARM" in platform.version()
 __arm64__ = _any_arm and __LP64__
 __arm__ = _any_arm and not __LP64__
 
@@ -127,32 +123,28 @@ def ctype_for_type(tp):
     """Look up the C type corresponding to the given Python type.
 
     This conversion is applied to types used in
-    :class:`~rubicon.objc.api.objc_method` signatures,
-    :class:`~rubicon.objc.api.objc_ivar` types, etc. This function translates
-    Python built-in types and :mod:`rubicon.objc` classes to their
-    :mod:`ctypes` equivalents. Unregistered types (including types that are
-    already ctypes) are returned unchanged.
+    [`objc_method`][rubicon.objc.api.objc_method] signatures,
+    [`objc_ivar`][rubicon.objc.api.objc_ivar] types, etc. This function translates
+    Python built-in types and [`rubicon.objc`][rubicon-objc-module] classes to their
+    [`ctypes`][] equivalents. Unregistered types (including types that are already
+    ctypes) are returned unchanged.
     """
-
     return _ctype_for_type_map.get(tp, tp)
 
 
 def register_ctype_for_type(tp, ctype):
     """Register a conversion from a Python type to a C type."""
-
     _ctype_for_type_map[tp] = ctype
 
 
 def unregister_ctype_for_type(tp):
     """Unregister a conversion from a Python type to a C type."""
-
     del _ctype_for_type_map[tp]
 
 
 def get_ctype_for_type_map():
     """Get a copy of all currently registered type-to-C type conversions as a
     mapping."""
-
     return dict(_ctype_for_type_map)
 
 
@@ -163,11 +155,9 @@ _encoding_for_ctype_map = {}
 def _end_of_encoding(encoding, start):
     """Find the end index of the encoding starting at index start.
 
-    The encoding is not validated very extensively. There are no
-    guarantees what happens for invalid encodings; an error may be
-    raised, or a bogus end index may be returned.
+    The encoding is not validated very extensively. There are no guarantees what happens
+    for invalid encodings; an error may be raised, or a bogus end index may be returned.
     """
-
     if start < 0 or start >= len(encoding):
         raise ValueError(f"Start index {start} not in range({len(encoding)})")
 
@@ -178,7 +168,8 @@ def _end_of_encoding(encoding, start):
         c = encoding[i : i + 1]
         if c in b"([{<":
             # Opening parenthesis of some type, wait for a corresponding closing paren.
-            # This doesn't check that the parenthesis *types* match (only the *number* of closing parens has to match).
+            # This doesn't check that the parenthesis *types* match (only the *number*
+            # of closing parens has to match).
             paren_depth += 1
             i += 1
         elif paren_depth > 0:
@@ -193,12 +184,14 @@ def _end_of_encoding(encoding, start):
             # Encodings with exactly one character.
             return i + 1
         elif c in b"^ANORVjnor":
-            # Simple prefix (qualifier, pointer, etc.), skip it but count it towards the length.
+            # Simple prefix (qualifier, pointer, etc.), skip it but count it towards
+            # the length.
             i += 1
         elif c == b"@":
             if encoding[i + 1 : i + 3] == b"?<":
                 # Encoding @?<...> (block with signature).
-                # Skip the @? and continue at the < which is treated as an opening paren.
+                # Skip the @? and continue at the < which is treated as an
+                # opening paren.
                 i += 2
             elif encoding[i + 1 : i + 2] == b"?":
                 # Encoding @? (block).
@@ -222,7 +215,8 @@ def _end_of_encoding(encoding, start):
 
     if paren_depth > 0:
         raise ValueError(
-            f"Incomplete encoding, missing {paren_depth} closing parentheses: {encoding}"
+            f"Incomplete encoding, missing {paren_depth} closing parentheses: "
+            f"{encoding}"
         )
     else:
         raise ValueError(
@@ -233,8 +227,8 @@ def _end_of_encoding(encoding, start):
 def _create_structish_type_for_encoding(encoding, *, base):
     """Create a structish type from the given encoding.
 
-    ("structish" = "structure or union")
-    The base kwarg controls which base class is used. It should be either ctypes.Structure or ctypes.Union.
+    ("structish" = "structure or union") The base kwarg controls which base class is
+    used. It should be either ctypes.Structure or ctypes.Union.
     """
 
     # Split name and fields.
@@ -245,8 +239,8 @@ def _create_structish_type_for_encoding(encoding, *, base):
     if not eq:
         # If the fields are not present, we can't create a meaningful structish.
         # We also know that there is no known structish with this name,
-        # because in that case that structish would have been found by ctype_for_encoding.
-        # So we pretend that this structish is a void (None).
+        # because in that case that structish would have been found by
+        # ctype_for_encoding. So we pretend that this structish is a void (None).
         # This causes pointers to it to become void pointers.
         return None
 
@@ -260,13 +254,15 @@ def _create_structish_type_for_encoding(encoding, *, base):
     # marker so that we can easily identify anonymous structures.
     py_name = "_Anonymous" if name is None else name.decode("utf-8")
     structish_type = type(py_name, (base,), {"__anonymous__": name is None})
-    # Register the structish for its own encoding, so the same type is used in the future.
+    # Register the structish for its own encoding, so the same type
+    # is used in the future.
     register_encoding(encoding, structish_type)
     if name is not None:
         # If not anonymous, also register for the corresponding name-only encoding.
         register_encoding(begin + name + end, structish_type)
 
-    # Convert the field encodings to a sequence of tuples, as needed for the _fields_ attribute.
+    # Convert the field encodings to a sequence of tuples, as needed for
+    # the _fields_ attribute.
     ctypes_fields = []
     start = 0  # Start of the next field.
     i = 0  # Field counter, used when naming unnamed fields.
@@ -304,10 +300,10 @@ def _ctype_for_unknown_encoding(encoding):
         register_encoding(encoding, pointer_type)
         return pointer_type
     elif encoding.startswith(b"[") and encoding.endswith(b"]"):
-        # Resolve array types recursively.
-        for i, c in enumerate(encoding[1:], start=1):
-            if c not in b"0123456789":
-                break
+        # Resolve array types recursively
+        i = 1
+        while encoding[i] in b"0123456789":
+            i += 1
         assert i != 1
         array_length = int(encoding[1:i].decode("utf-8"))
         array_type = ctype_for_encoding(encoding[i:-1]) * array_length
@@ -333,7 +329,7 @@ def _ctype_for_unknown_encoding(encoding):
         raise ValueError(
             f"An unknown encoding cannot appear outside of a pointer: {encoding}"
         )
-    elif encoding.startswith(b"T") or encoding.startswith(b"t"):
+    elif encoding.startswith((b"T", b"t")):
         raise ValueError(f"128-bit integers are not supported by ctypes: {encoding}")
     elif encoding.startswith(b"j"):
         raise ValueError(f"Complex numbers are not supported by ctypes: {encoding}")
@@ -346,22 +342,20 @@ def _ctype_for_unknown_encoding(encoding):
 def ctype_for_encoding(encoding):
     """Return the C type corresponding to an Objective-C type encoding.
 
-    If a C type has been registered for the encoding, that type is returned.
-    Otherwise, if the type encoding represents a compound type (pointer, array,
-    structure, or union), the contained types are converted recursively. A new
-    C type is then created from the converted ctypes, and is registered for
-    the encoding (so that future conversions of the same encoding return the
-    same C type).
+    If a C type has been registered for the encoding, that type is returned. Otherwise,
+    if the type encoding represents a compound type (pointer, array, structure, or
+    union), the contained types are converted recursively. A new C type is then created
+    from the converted ctypes, and is registered for the encoding (so that future
+    conversions of the same encoding return the same C type).
 
-    For example, the type encoding ``{spam=ic}`` is not registered by default.
-    However, the contained types ``i`` and ``c`` are registered, so they are
-    converted individually and used to create a new :class:`~ctypes.Structure`
-    with two fields of the correct types. The new structure type is then
-    registered for the original encoding ``{spam=ic}`` and returned.
+    For example, the type encoding `{spam=ic}` is not registered by default. However,
+    the contained types `i` and `c` are registered, so they are converted individually
+    and used to create a new [`ctypes.Structure`][] with two fields of the correct
+    types. The new structure type is then registered for the original encoding
+    `{spam=ic}` and returned.
 
     :raises ValueError: if the conversion fails at any point
     """
-
     # Remove qualifiers, as documented in Table 6-2 here:
     # https://developer.apple.com/library/content/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtTypeEncodings.html
     encoding = encoding.lstrip(b"NORVnor")
@@ -382,40 +376,41 @@ def encoding_for_ctype(ctype):
 
     Automatic encoding of other compound types (arrays, structures, and unions)
     is currently not supported. To encode such types, a type encoding must be
-    manually provided for them using :func:`register_preferred_encoding` or
-    :func:`register_encoding`.
+    manually provided for them using
+    [`register_preferred_encoding`][rubicon.objc.types.register_preferred_encoding] or
+    [`register_encoding`][rubicon.objc.types.register_encoding].
 
     :raises ValueError: if the conversion fails at any point
     """
-
     try:
         return _encoding_for_ctype_map[ctype]
     except KeyError:
         try:
             return b"^" + encoding_for_ctype(ctype._type_)
-        except KeyError:
-            raise ValueError(f"No type encoding known for ctype {ctype}")
+        except AttributeError as exc:
+            raise ValueError(f"No type encoding known for ctype {ctype}") from exc
 
 
 def register_preferred_encoding(encoding, ctype):
-    """Register a preferred conversion between an Objective-C type encoding and
-    a C type.
+    """Register a preferred conversion between an Objective-C type encoding and a C
+    type.
 
     "Preferred" means that any existing conversions in each direction are
     overwritten with the new conversion. To register an encoding without
-    overwriting existing conversions, use :func:`register_encoding`.
+    overwriting existing conversions, use
+    [`register_encoding`][rubicon.objc.types.register_encoding].
     """
-
     _ctype_for_encoding_map[encoding] = ctype
     _encoding_for_ctype_map[ctype] = encoding
 
 
 def with_preferred_encoding(encoding):
-    """Register a preferred conversion between an Objective-C type encoding and
-    the decorated C type.
-
-    This is equivalent to calling :func:`register_preferred_encoding` on the
+    """Register a preferred conversion between an Objective-C type encoding and the
     decorated C type.
+
+    This is equivalent to calling
+    [`register_preferred_encoding`][rubicon.objc.types.register_preferred_encoding] on
+    the decorated C type.
     """
 
     def _with_preferred_encoding_decorator(ctype):
@@ -426,23 +421,24 @@ def with_preferred_encoding(encoding):
 
 
 def register_encoding(encoding, ctype):
-    """Register an additional conversion between an Objective-C type encoding
-    and a C type.
+    """Register an additional conversion between an Objective-C type encoding and a C
+    type.
 
     "Additional" means that any existing conversions in either direction are
     *not* overwritten with the new conversion. To register an encoding and
-    overwrite existing conversions, use :func:`register_preferred_encoding`.
+    overwrite existing conversions, use
+    [`register_preferred_encoding`][rubicon.objc.types.register_preferred_encoding].
     """
-
     _ctype_for_encoding_map.setdefault(encoding, ctype)
     _encoding_for_ctype_map.setdefault(ctype, encoding)
 
 
 def with_encoding(encoding):
-    """Register an additional conversion between an Objective-C type encoding
-    and the decorated C type.
+    """Register an additional conversion between an Objective-C type encoding and the
+    decorated C type.
 
-    This is equivalent to calling :func:`register_encoding` on the
+    This is equivalent to calling
+    [`register_encoding`][rubicon.objc.types.register_encoding] on the
     decorated C type.
     """
 
@@ -454,17 +450,18 @@ def with_encoding(encoding):
 
 
 def unregister_encoding(encoding):
-    """Unregister the conversion from an Objective-C type encoding to its
-    corresponding C type.
+    """Unregister the conversion from an Objective-C type encoding to its corresponding
+    C type.
 
     Note that this does not remove any conversions in the other direction (from
     a C type to this encoding). These conversions may be replaced with
-    :func:`register_encoding`, or unregistered with :func:`unregister_ctype`. To
-    remove all ctypes for an encoding, use :func:`unregister_encoding_all`.
+    [`register_encoding`][rubicon.objc.types.register_encoding], or unregistered with
+    [`unregister_ctype`][rubicon.objc.types.unregister_ctype]. To remove all ctypes for
+    an encoding, use
+    [`unregister_encoding_all`][rubicon.objc.types.unregister_encoding_all].
 
     If the encoding was not registered previously, nothing happens.
     """
-
     _ctype_for_encoding_map.pop(encoding, None)
 
 
@@ -473,11 +470,10 @@ def unregister_encoding_all(encoding):
     corresponding ctypes.
 
     All conversions from any C type to this encoding are removed recursively
-    using :func:`unregister_ctype_all`.
+    using [`unregister_ctype_all`][rubicon.objc.types.unregister_ctype_all].
 
     If the encoding was not registered previously, nothing happens.
     """
-
     _ctype_for_encoding_map.pop(encoding, None)
     for ct, enc in list(_encoding_for_ctype_map.items()):
         if enc == encoding:
@@ -485,61 +481,59 @@ def unregister_encoding_all(encoding):
 
 
 def unregister_ctype(ctype):
-    """Unregister the conversion from a C type to its corresponding
-    Objective-C type encoding.
+    """Unregister the conversion from a C type to its corresponding Objective-C type
+    encoding.
 
     Note that this does not remove any conversions in the other direction (from
     an encoding to this C type). These conversions may be replaced with
-    :func:`register_encoding`, or unregistered with :func:`unregister_encoding`.
-    To remove all encodings for a C type, use :func:`unregister_ctype_all`.
+    [`register_encoding`][rubicon.objc.types.register_encoding], or unregistered
+    with [`unregister_encoding`][rubicon.objc.types.unregister_encoding]. To
+    remove all encodings for a C type, use
+    [`unregister_ctype_all`][rubicon.objc.types.unregister_ctype_all].
 
     If the C type was not registered previously, nothing happens.
     """
-
-    _encoding_for_ctype_map.pop(ctype, default=None)
+    _encoding_for_ctype_map.pop(ctype, None)
 
 
 def unregister_ctype_all(ctype):
-    """Unregister all conversions between a C type and all corresponding
-    Objective-C type encodings.
+    """Unregister all conversions between a C type and all corresponding Objective-C
+    type encodings.
 
     All conversions from any type encoding to this C type are removed
-    recursively using :func:`unregister_encoding_all`.
+    recursively using
+    [`unregister_encoding_all`][rubicon.objc.types.unregister_encoding_all].
 
     If the C type was not registered previously, nothing happens.
     """
-
-    _encoding_for_ctype_map.pop(ctype, default=None)
+    _encoding_for_ctype_map.pop(ctype, None)
     for enc, ct in list(_ctype_for_encoding_map.items()):
         if ct == ctype:
             unregister_encoding_all(enc)
 
 
 def get_ctype_for_encoding_map():
-    """Get a copy of all currently registered encoding-to-C type conversions
-    as a map."""
-
+    """Get a copy of all currently registered encoding-to-C type conversions as a
+    map."""
     return dict(_ctype_for_encoding_map)
 
 
 def get_encoding_for_ctype_map():
-    """Get a copy of all currently registered C type-to-encoding conversions
-    as a map."""
-
+    """Get a copy of all currently registered C type-to-encoding conversions as a
+    map."""
     return dict(_encoding_for_ctype_map)
 
 
 def split_method_encoding(encoding):
     """Split a method signature encoding into a sequence of type encodings.
 
-    The first type encoding represents the return type, all remaining type
-    encodings represent the argument types.
+    The first type encoding represents the return type, all remaining type encodings
+    represent the argument types.
 
-    If there are any numbers after a type encoding, they are ignored. On
-    PowerPC, these numbers indicated each argument/return value's offset on the
-    stack. These numbers are meaningless on modern architectures.
+    If there are any numbers after a type encoding, they are ignored. On PowerPC, these
+    numbers indicated each argument/return value's offset on the stack. These numbers
+    are meaningless on modern architectures.
     """
-
     encodings = []
     start = 0
     while start < len(encoding):
@@ -558,22 +552,25 @@ def ctypes_for_method_encoding(encoding):
     """Convert a method signature encoding into a sequence of ctypes.
 
     This is equivalent to first splitting the method signature encoding using
-    :func:`split_method_encoding`, and then converting each individual type
-    encoding using :func:`ctype_for_encoding`.
+    [`split_method_encoding`][rubicon.objc.types.split_method_encoding], and
+    then converting each individual type encoding using
+    [`ctype_for_encoding`][rubicon.objc.types.ctype_for_encoding].
     """
-
     return [ctype_for_encoding(enc) for enc in split_method_encoding(encoding)]
 
 
 def _struct_for_sequence(seq, struct_type):
     if len(seq) != len(struct_type._fields_):
         raise ValueError(
-            f"Struct type {struct_type.__module__}.{struct_type.__qualname__} has {len(struct_type._fields_)} fields, "
-            f"but a sequence of length {len(seq)} was given"
+            f"Struct type {struct_type.__module__}.{struct_type.__qualname__} has "
+            f"{len(struct_type._fields_)} fields, but a sequence of length "
+            f"{len(seq)} was given"
         )
 
     values = []
-    for value, (field_name, field_type, *_) in zip(seq, struct_type._fields_):
+    for value, (_field_name, field_type, *_) in zip(
+        seq, struct_type._fields_, strict=True
+    ):
         if issubclass(field_type, (Structure, Array)) and isinstance(
             value, collections.abc.Iterable
         ):
@@ -587,8 +584,9 @@ def _struct_for_sequence(seq, struct_type):
 def _array_for_sequence(seq, array_type):
     if len(seq) != array_type._length_:
         raise ValueError(
-            f"Array type {array_type.__module__}.{array_type.__qualname__} has {array_type._length_} fields, "
-            f"but a sequence of length {len(seq)} was given"
+            f"Array type {array_type.__module__}.{array_type.__qualname__} has "
+            f"{array_type._length_} fields, but a sequence of length {len(seq)} "
+            f"was given"
         )
 
     if issubclass(array_type._type_, (Structure, Array)):
@@ -605,29 +603,27 @@ def _array_for_sequence(seq, array_type):
 
 
 def compound_value_for_sequence(seq, tp):
-    """Create a C structure or array of type ``tp``, initialized with values
-    from ``seq``.
+    """Create a C structure or array of type `tp`, initialized with values from `seq`.
 
-    If ``tp`` is a :class:`~ctypes.Structure` type, the newly created
-    structure's fields are initialized in declaration order with the values from
-    ``seq``. ``seq`` must have as many elements as the structure has fields.
+    If `tp` is a [`ctypes.Structure`][] type, the newly created structure's fields are
+    initialized in declaration order with the values from `seq`. `seq` must have as many
+    elements as the structure has fields.
 
-    If ``tp`` is a :class:`~ctypes.Array` type, the newly created array is
-    initialized with the values from ``seq``. ``seq`` must have as many elements
-    as the array type.
+    If `tp` is a [`Array`][ctypes.Array] type, the newly created array is initialized
+    with the values from `seq`. `seq` must have as many elements as the array type.
 
-    In both cases, if a structure field type or the array element type is itself
-    a structure or array type, the corresponding value from ``seq`` is
-    recursively converted as well.
+    In both cases, if a structure field type or the array element type is itself a
+    structure or array type, the corresponding value from `seq` is recursively converted
+    as well.
     """
-
     if issubclass(tp, Structure):
         return _struct_for_sequence(seq, tp)
     elif issubclass(tp, Array):
         return _array_for_sequence(seq, tp)
     else:
         raise TypeError(
-            f"Don't know how to convert a sequence to a {tp.__module__}.{tp.__qualname__}"
+            f"Don't know how to convert a sequence to a "
+            f"{tp.__module__}.{tp.__qualname__}"
         )
 
 
@@ -646,7 +642,7 @@ register_preferred_encoding(b"L", c_ulong)
 
 # Do not register c_int or c_longlong as preferred.
 # If c_int or c_longlong is the same size as c_long, ctypes makes it an alias
-# for c_long. If we would register c_int and c_longlong as preferred, this
+# for c_long. If we registered c_int and c_longlong as preferred, this
 # could cause c_long to be encoded as b'i' or b'q', instead of b'l'.
 # The same applies to the unsigned versions.
 register_encoding(b"i", c_int)
@@ -693,7 +689,7 @@ register_preferred_encoding(b"^v", c_void_p)
 
 
 # Note CGBase.h located at
-# /System/Library/Frameworks/ApplicationServices.framework/Frameworks/CoreGraphics.framework/Headers/CGBase.h
+# /System/Library/Frameworks/ApplicationServices.framework/Frameworks/CoreGraphics.framework/Headers/CGBase.h  # noqa: E501
 # defines CGFloat as double if __LP64__, otherwise it's a float.
 if __LP64__:
     c_ptrdiff_t = c_long
@@ -707,7 +703,8 @@ if __LP64__:
     _UIEdgeInsetsEncoding = b"{UIEdgeInsets=dddd}"
     _NSEdgeInsetsEncoding = b"{NSEdgeInsets=dddd}"
     _PyObjectEncoding = b"^{_object=q^{_typeobject}}"
-else:
+else:  # pragma: no cover
+    # Can't easily test 32 bit platforms
     c_ptrdiff_t = c_int
     NSInteger = c_int
     NSUInteger = c_uint
@@ -732,18 +729,17 @@ register_preferred_encoding(_PyObjectEncoding, py_object)
 @with_encoding(b"^{?}")
 @with_encoding(b"^(?)")
 class UnknownPointer(c_void_p):
-    """Placeholder for the "unknown pointer" types ``^?``, ``^{?}`` and
-    ``^(?)``.
+    """Placeholder for the "unknown pointer" types `^?`, `^{?}` and `^(?)`.
 
-    Not to be confused with a ``^v`` void pointer.
+    Not to be confused with a `^v` void pointer.
 
-    Usually a ``^?`` is a function pointer, but because the encoding doesn't
-    contain the function signature, you need to manually create a CFUNCTYPE with
-    the proper types, and cast this pointer to it.
+    Usually a `^?` is a function pointer, but because the encoding doesn't contain the
+    function signature, you need to manually create a CFUNCTYPE with the proper types,
+    and cast this pointer to it.
 
-    ``^{?}`` and ``^(?)`` are pointers to a structure or union (respectively)
-    with unknown name and fields. Such a type also cannot be used meaningfully
-    without casting it to the correct pointer type first.
+    `^{?}` and `^(?)` are pointers to a structure or union (respectively) with unknown
+    name and fields. Such a type also cannot be used meaningfully without casting it to
+    the correct pointer type first.
     """
 
 
@@ -764,7 +760,8 @@ class NSPoint(Structure):
 
 if _CGPointEncoding == _NSPointEncoding:
     CGPoint = NSPoint
-else:
+else:  # pragma: no cover
+    # Can't easily test 32 bit platforms
 
     @with_preferred_encoding(_CGPointEncoding)
     class CGPoint(Structure):
@@ -796,7 +793,8 @@ class NSSize(Structure):
 
 if _CGSizeEncoding == _NSSizeEncoding:
     CGSize = NSSize
-else:
+else:  # pragma: no cover
+    # Can't easily test 32 bit platforms
 
     @with_preferred_encoding(_CGSizeEncoding)
     class CGSize(Structure):
@@ -832,7 +830,8 @@ class NSRect(Structure):
 
 if _CGRectEncoding == _NSRectEncoding:
     CGRect = NSRect
-else:
+else:  # pragma: no cover
+    # Can't easily test 32 bit platforms
 
     @with_preferred_encoding(_CGRectEncoding)
     class CGRect(Structure):
@@ -853,26 +852,32 @@ else:
 
 
 def NSMakeSize(w, h):
+    """Constructs a new [`NSSize`][rubicon.objc.types.NSSize] object."""
     return NSSize(w, h)
 
 
 def CGSizeMake(w, h):
+    """Constructs a new [`CGSize`][rubicon.objc.types.CGSize] object."""
     return CGSize(w, h)
 
 
 def NSMakeRect(x, y, w, h):
+    """Constructs a new [`NSRect`][rubicon.objc.types.NSRect] object."""
     return NSRect(NSPoint(x, y), NSSize(w, h))
 
 
 def CGRectMake(x, y, w, h):
+    """Constructs a new [`CGRect`][rubicon.objc.types.CGRect] object."""
     return CGRect(CGPoint(x, y), CGSize(w, h))
 
 
 def NSMakePoint(x, y):
+    """Constructs a new [`NSPoint`][rubicon.objc.types.NSPoint] object."""
     return NSPoint(x, y)
 
 
 def CGPointMake(x, y):
+    """Constructs a new [`CGPoint`][rubicon.objc.types.CGPoint] object."""
     return CGPoint(x, y)
 
 
@@ -890,14 +895,26 @@ class UIEdgeInsets(Structure):
         return f"<UIEdgeInsets({self.top}, {self.left}, {self.bottom}, {self.right})>"
 
     def __str__(self):
-        return f"top={self.top}, left={self.left}, bottom={self.bottom}, right={self.right}"
+        return (
+            f"top={self.top}, left={self.left}, bottom={self.bottom}, "
+            f"right={self.right}"
+        )
 
 
 def UIEdgeInsetsMake(top, left, bottom, right):
+    """Constructs a new [`UIEdgeInsets`][rubicon.objc.types.UIEdgeInsets] object."""
     return UIEdgeInsets(top, left, bottom, right)
 
 
-UIEdgeInsetsZero = UIEdgeInsets(0, 0, 0, 0)
+# check-docstring-is-first made us do this
+if True:
+    UIEdgeInsetsZero = UIEdgeInsets(0, 0, 0, 0)
+    """
+    The constant
+    [UIEdgeInsetsZero](https://developer.apple.com/documentation/uikit/uiedgeinsetszero?language=objc):
+    a [`UIEdgeInsets`][rubicon.objc.types.UIEdgeInsets] instance with all
+    insets set to zero.
+    """
 
 
 # macOS: /System/Library/Frameworks/AppKit.framework/Headers/NSLayoutConstraint.h
@@ -914,10 +931,15 @@ class NSEdgeInsets(Structure):
         return f"<NSEdgeInsets({self.top}, {self.left}, {self.bottom}, {self.right})>"
 
     def __str__(self):
-        return f"top={self.top}, left={self.left}, bottom={self.bottom}, right={self.right}"
+        return (
+            f"top={self.top}, left={self.left}, bottom={self.bottom}, "
+            f"right={self.right}"
+        )
 
 
 def NSEdgeInsetsMake(top, left, bottom, right):
+    """Create and return an [`NSEdgeInsets`][rubicon.objc.types.NSEdgeInsets] with the
+    supplied edge values."""
     return NSEdgeInsets(top, left, bottom, right)
 
 
@@ -963,11 +985,39 @@ class NSRange(Structure):
         return f"location={self.location}, length={self.length}"
 
 
-NSZeroPoint = NSPoint(0, 0)
+# check-docstring-is-first made us do this
+if True:
+    NSZeroPoint = NSPoint(0, 0)
+    """
+    The constant
+    [NSZeroPoint](https://developer.apple.com/documentation/foundation/nszeropoint?language=objc):
+    a [`NSPoint`][rubicon.objc.types.NSPoint] instance with the X and Y
+    coordinates set to zero.
+    """
 
-
-if sizeof(c_void_p) == 4:
+if sizeof(c_void_p) == 4:  # pragma: no cover
+    # Can't easily test 32 bit platforms
     NSIntegerMax = 0x7FFFFFFF
+    """
+    The macro constant
+    [NSIntegerMax](https://developer.apple.com/documentation/objectivec/nsintegermax?language=objc)
+    from `<objc/NSObjCRuntime.h>`: the maximum value that a
+    [`NSInteger`][rubicon.objc.types.NSInteger] can hold.
+    """
+
 elif sizeof(c_void_p) == 8:
     NSIntegerMax = 0x7FFFFFFFFFFFFFFF
-NSNotFound = NSIntegerMax
+else:  # pragma: no cover
+    # This shouldn't happen; pointers can only be 4 or 8 bytes.
+    pass
+
+# check-docstring-is-first made us do this
+if True:
+    NSNotFound = NSIntegerMax
+    """
+    The constant
+    [NSNotFound](https://developer.apple.com/documentation/foundation/nsnotfound?language=objc)
+    from `<Foundation/NSObjCRuntime.h>`: a
+    [`NSInteger`][rubicon.objc.types.NSInteger] sentinel value indicating that
+    an item was not found (usually when searching in a collection).
+    """

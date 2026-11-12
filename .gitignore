@@ -2,15 +2,26 @@
 *~
 .*.sw[op]
 *.egg-info
+*.dist-info
 .coverage
 dist
 build
 _build
+logs/
 distribute-*
 venv*/
+venv/*
+.venv/
 local
+logs
 .tox
 .envrc
+*.dylib
+*.so
+*.DS_Store
+
+# markdown-checker failure output
+comment.md
 
 # OS X
 .DS_Store
@@ -21,3 +32,16 @@ local
 
 # VS Code
 .vscode/
+
+# AI tooling
+.kilo/
+.opencode/
+.specify/scripts
+.specify/templates
+.specify/extensions.yml
+.specify/extensions
+.specify/init-options.json
+.specify/integration.json
+.specify/integrations
+.specify/workflows
+.specify/workflow.yml

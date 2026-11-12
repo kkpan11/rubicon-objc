@@ -1,30 +1,109 @@
 from __future__ import annotations
 
 import ctypes
-import unittest
+import sys
+
+import pytest
+
+if sys.version_info >= (3, 16):
+    pytest.skip(
+        reason="ctypes_patch not required on Python 3.16+",
+        allow_module_level=True,
+    )
 
 from rubicon.objc import ctypes_patch
 
 
-class CtypesPatchTest(unittest.TestCase):
-    def test_patch_structure(self):
-        """A custom structure can be patched successfully."""
+def test_patch_structure():
+    """A custom structure can be patched successfully."""
 
-        class TestStruct(ctypes.Structure):
-            _fields_ = [
-                ("spam", ctypes.c_int),
-                ("ham", ctypes.c_double),
-            ]
+    class TestStruct(ctypes.Structure):
+        _fields_ = [
+            ("spam", ctypes.c_int),
+            ("ham", ctypes.c_double),
+        ]
 
-        functype = ctypes.CFUNCTYPE(TestStruct)
+    functype = ctypes.CFUNCTYPE(TestStruct)
 
-        # Before patching, the structure cannot be returned from a callback.
-        with self.assertRaises(TypeError):
+    # Before patching, the structure cannot be returned from a callback.
+    with pytest.raises(TypeError):
 
-            @functype
-            def get_struct_fail():
-                return TestStruct(123, 123)
+        @functype
+        def get_struct_fail():
+            return TestStruct(123, 123)
 
+    ctypes_patch.make_callback_returnable(TestStruct)
+
+    # After patching, the structure can be returned from a callback.
+    @functype
+    def get_struct():
+        return TestStruct(123, 123)
+
+    # After being returned from the callback, the structure's data is intact.
+    struct = get_struct()
+    assert struct.spam == 123
+    assert struct.ham == 123
+
+
+def test_patch_pointer():
+    """A custom pointer type can be patched successfully."""
+
+    class TestStruct(ctypes.Structure):
+        _fields_ = [
+            ("spam", ctypes.c_int),
+            ("ham", ctypes.c_double),
+        ]
+
+    pointertype = ctypes.POINTER(TestStruct)
+    functype = ctypes.CFUNCTYPE(pointertype)
+
+    original_struct = TestStruct(123, 123)
+
+    # Before patching, the pointer cannot be returned from a callback.
+    with pytest.raises(TypeError):
+
+        @functype
+        def get_struct_fail():
+            return pointertype(original_struct)
+
+    ctypes_patch.make_callback_returnable(pointertype)
+
+    # After patching, the structure can be returned from a callback.
+    @functype
+    def get_struct():
+        return pointertype(original_struct)
+
+    # After being returned from the callback, the pointer's data is intact.
+    struct_pointer = get_struct()
+    assert ctypes.addressof(struct_pointer.contents) == ctypes.addressof(
+        original_struct
+    )
+    assert struct_pointer.contents.spam == 123
+    assert struct_pointer.contents.ham == 123
+
+
+@pytest.mark.parametrize(
+    "tp",
+    [ctypes.c_int, ctypes.c_double, ctypes.c_char_p, ctypes.c_void_p],
+)
+def test_no_patch_primitives(tp):
+    """Primitive types cannot be patched."""
+    with pytest.raises(ValueError):
+        ctypes_patch.make_callback_returnable(tp)
+
+
+def test_patch_idempotent():
+    """Patching a type multiple times is equivalent to patching once."""
+
+    class TestStruct(ctypes.Structure):
+        _fields_ = [
+            ("spam", ctypes.c_int),
+            ("ham", ctypes.c_double),
+        ]
+
+    functype = ctypes.CFUNCTYPE(TestStruct)
+
+    for _ in range(5):
         ctypes_patch.make_callback_returnable(TestStruct)
 
         # After patching, the structure can be returned from a callback.
@@ -34,101 +113,114 @@ class CtypesPatchTest(unittest.TestCase):
 
         # After being returned from the callback, the structure's data is intact.
         struct = get_struct()
-        self.assertEqual(struct.spam, 123)
-        self.assertEqual(struct.ham, 123)
+        assert struct.spam == 123
+        assert struct.ham == 123
 
-    def test_patch_pointer(self):
-        """A custom pointer type can be patched successfully."""
 
-        class TestStruct(ctypes.Structure):
-            _fields_ = [
-                ("spam", ctypes.c_int),
-                ("ham", ctypes.c_double),
-            ]
+def test_patched_type_returned_often():
+    """Returning a patched type very often works properly without crashing anything.
 
-        pointertype = ctypes.POINTER(TestStruct)
-        functype = ctypes.CFUNCTYPE(pointertype)
+    This checks that bpo-36880 is either fixed or worked around.
+    """
 
-        original_struct = TestStruct(123, 123)
+    class TestStruct(ctypes.Structure):
+        _fields_ = [
+            ("spam", ctypes.c_int),
+            ("ham", ctypes.c_double),
+        ]
 
-        # Before patching, the pointer cannot be returned from a callback.
-        with self.assertRaises(TypeError):
+    functype = ctypes.CFUNCTYPE(TestStruct)
 
-            @functype
-            def get_struct_fail():
-                return pointertype(original_struct)
+    ctypes_patch.make_callback_returnable(TestStruct)
 
-        ctypes_patch.make_callback_returnable(pointertype)
+    # After patching, the structure can be returned from a callback.
+    @functype
+    def get_struct():
+        return TestStruct(123, 123)
 
-        # After patching, the structure can be returned from a callback.
-        @functype
-        def get_struct():
-            return pointertype(original_struct)
+    for _ in range(10000):
+        # After being returned from the callback, the structure's data is intact.
+        struct = get_struct()
+        assert struct.spam == 123
+        assert struct.ham == 123
 
-        # After being returned from the callback, the pointer's data is intact.
-        struct_pointer = get_struct()
-        self.assertEqual(
-            ctypes.addressof(struct_pointer.contents), ctypes.addressof(original_struct)
-        )
-        self.assertEqual(struct_pointer.contents.spam, 123)
-        self.assertEqual(struct_pointer.contents.ham, 123)
 
-    def test_no_patch_primitives(self):
-        """Primitive types cannot be patched."""
+before_313 = pytest.mark.skipif(
+    sys.version_info >= (3, 13),
+    reason="StgDict was replaced by StgInfo in Python 3.13",
+)
+since_313 = pytest.mark.skipif(
+    sys.version_info < (3, 13),
+    reason="StgInfo was introduced in Python 3.13",
+)
 
-        for tp in (ctypes.c_int, ctypes.c_double, ctypes.c_char_p, ctypes.c_void_p):
-            with self.subTest(tp):
-                with self.assertRaises(ValueError):
-                    ctypes_patch.make_callback_returnable(tp)
 
-    def test_patch_idempotent(self):
-        """Patching a type multiple times is equivalent to patching once."""
+@before_313
+def test_unwrap_mappingproxy_not_a_proxy():
+    """Unwrapping something other than a mapping proxy is a TypeError."""
+    with pytest.raises(TypeError, match="Expected a mapping proxy object"):
+        ctypes_patch.unwrap_mappingproxy({"spam": 1})
 
-        class TestStruct(ctypes.Structure):
-            _fields_ = [
-                ("spam", ctypes.c_int),
-                ("ham", ctypes.c_double),
-            ]
 
-        functype = ctypes.CFUNCTYPE(TestStruct)
+@before_313
+@pytest.mark.parametrize("value", [42, "abc", None, ctypes.c_int(1)])
+def test_get_stgdict_of_type_not_a_type(value):
+    """Looking up the StgDict of a non-type is a TypeError."""
+    with pytest.raises(TypeError, match="Expected a type object"):
+        ctypes_patch.get_stgdict_of_type(value)
 
-        for _ in range(5):
-            ctypes_patch.make_callback_returnable(TestStruct)
 
-            # After patching, the structure can be returned from a callback.
-            @functype
-            def get_struct():
-                return TestStruct(123, 123)
+@before_313
+@pytest.mark.parametrize("tp", [int, str, object])
+def test_get_stgdict_of_type_not_a_ctype(tp):
+    """Looking up the StgDict of a non-ctypes type is a TypeError."""
+    with pytest.raises(TypeError, match="must be a StgDict"):
+        ctypes_patch.get_stgdict_of_type(tp)
 
-            # After being returned from the callback, the structure's data is intact.
-            struct = get_struct()
-            self.assertEqual(struct.spam, 123)
-            self.assertEqual(struct.ham, 123)
 
-    def test_patched_type_returned_often(self):
-        """Returning a patched type very often works properly without crashing
-        anything.
+@before_313
+def test_get_stgdict_plain_dict():
+    """A type whose __dict__ is not a mapping proxy is not a StgDict."""
 
-        This checks that bpo-36880 is either fixed or worked around.
-        """
+    class PlainDictMeta(type):
+        @property
+        def __dict__(cls):
+            return {"not": "a stgdict"}
 
-        class TestStruct(ctypes.Structure):
-            _fields_ = [
-                ("spam", ctypes.c_int),
-                ("ham", ctypes.c_double),
-            ]
+    class PlainDictType(metaclass=PlainDictMeta):
+        pass
 
-        functype = ctypes.CFUNCTYPE(TestStruct)
+    with pytest.raises(TypeError, match="must be a StgDict"):
+        ctypes_patch.get_stgdict_of_type(PlainDictType)
 
-        ctypes_patch.make_callback_returnable(TestStruct)
 
-        # After patching, the structure can be returned from a callback.
-        @functype
-        def get_struct():
-            return TestStruct(123, 123)
+@since_313
+@pytest.mark.parametrize("tp", [42, "abc", None, int, object])
+def test_get_stginfo_of_type_not_a_ctype(tp):
+    """Looking up the StgInfo of anything but a ctypes type is a TypeError."""
+    with pytest.raises(TypeError, match="Expected a ctypes structure type"):
+        ctypes_patch.get_stginfo_of_type(tp)
 
-        for _ in range(10000):
-            # After being returned from the callback, the structure's data is intact.
-            struct = get_struct()
-            self.assertEqual(struct.spam, 123)
-            self.assertEqual(struct.ham, 123)
+
+@since_313
+@pytest.mark.parametrize("tp", [ctypes.Structure, ctypes.Union])
+def test_get_stginfo_of_type_uninitialized(tp):
+    """The abstract ctypes base classes have no initialized StgInfo."""
+    with pytest.raises(TypeError, match="has not been initialized"):
+        ctypes_patch.get_stginfo_of_type(tp)
+
+
+def test_no_patch_setfunc_only():
+    """A type that already has a setfunc, but no getfunc, cannot be patched."""
+
+    class OnlySetfunc(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_int)]
+
+    if sys.version_info < (3, 13):
+        stg = ctypes_patch.get_stgdict_of_type(OnlySetfunc)
+    else:
+        stg = ctypes_patch.get_stginfo_of_type(OnlySetfunc)
+    stg.setfunc = ctypes_patch.SETFUNC(lambda ptr, value, size: None)
+
+    with pytest.raises(ValueError, match="already has a setfunc"):
+        ctypes_patch.make_callback_returnable(OnlySetfunc)
